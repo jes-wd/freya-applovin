@@ -44,5 +44,41 @@ define( 'FREYA_APPLOVIN_COOKIE_LIFETIME', YEAR_IN_SECONDS );
 /** HTTP timeout (seconds) for blocking Axon Event API requests. */
 define( 'FREYA_APPLOVIN_HTTP_TIMEOUT', 15 );
 
-/** Entry meta key: timestamp the generate_lead event was sent to AppLovin. */
+/** Entry meta key: timestamp the generate_lead event was sent to AppLovin (legacy GF flow). */
 define( 'FREYA_APPLOVIN_META_SENT_AT', 'freya_applovin_sent_at' );
+
+/** Order meta key: timestamp the generate_lead event was sent for a new-customer purchase. */
+define( 'FREYA_APPLOVIN_META_ORDER_LEAD_SENT_AT', '_freya_applovin_lead_sent_at' );
+
+/** Order meta key: AppLovin aleid click identifier captured at checkout. */
+define( 'FREYA_APPLOVIN_META_ORDER_ALEID', '_freya_applovin_aleid' );
+
+/** Order meta key: AppLovin alart click identifier captured at checkout. */
+define( 'FREYA_APPLOVIN_META_ORDER_ALART', '_freya_applovin_alart' );
+
+/** Order meta key: stable first-party client identifier captured at checkout. */
+define( 'FREYA_APPLOVIN_META_ORDER_CLIENT_ID', '_freya_applovin_client_id' );
+
+/** User meta: last AppLovin aleid click identifier for the account. */
+define( 'FREYA_APPLOVIN_META_USER_ALEID', '_freya_applovin_aleid' );
+
+/** User meta: last AppLovin alart click identifier for the account. */
+define( 'FREYA_APPLOVIN_META_USER_ALART', '_freya_applovin_alart' );
+
+/** User meta: stable first-party client identifier for the account. */
+define( 'FREYA_APPLOVIN_META_USER_CLIENT_ID', '_freya_applovin_client_id' );
+
+/** Gravity Forms entry meta: aleid captured at lead submission. */
+define( 'FREYA_APPLOVIN_META_ENTRY_ALEID', 'freya_applovin_aleid' );
+
+/** Gravity Forms entry meta: alart captured at lead submission. */
+define( 'FREYA_APPLOVIN_META_ENTRY_ALART', 'freya_applovin_alart' );
+
+/** Gravity Forms entry meta: client_id captured at lead submission. */
+define( 'FREYA_APPLOVIN_META_ENTRY_CLIENT_ID', 'freya_applovin_client_id' );
+
+/** WooCommerce session key for durable click / visitor identifiers. */
+define( 'FREYA_APPLOVIN_SESSION_KEY', 'freya_applovin_ids' );
+
+/** How long (seconds) to keep click IDs in WC session / user meta lookups. */
+define( 'FREYA_APPLOVIN_CLICK_ID_TTL', 30 * DAY_IN_SECONDS );

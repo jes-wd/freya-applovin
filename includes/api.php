@@ -20,7 +20,7 @@ function freya_applovin_debug_log( $message ) {
 		return;
 	}
 
-	error_log( '[Freya AppLovin] ' . $message ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+	// error_log( '[Freya AppLovin] ' . $message ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
 }
 
 /**
@@ -49,7 +49,7 @@ function freya_applovin_send_events( array $events, $blocking = true ) {
 	}
 
 	$payload = array( 'events' => array_values( $events ) );
-	$body    = wp_json_encode( $payload );
+	$body    = wp_json_encode( $payload, JSON_UNESCAPED_SLASHES );
 
 	freya_applovin_debug_log(
 		sprintf(

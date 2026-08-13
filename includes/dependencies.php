@@ -42,6 +42,15 @@ function freya_applovin_has_action_scheduler() {
 }
 
 /**
+ * Whether WooCommerce is available.
+ *
+ * @return bool
+ */
+function freya_applovin_has_woocommerce() {
+	return class_exists( 'WooCommerce' );
+}
+
+/**
  * Display a warning when the AppLovin credentials are missing.
  *
  * @return void

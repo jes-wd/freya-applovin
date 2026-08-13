@@ -94,106 +94,218 @@ function freya_applovin_track_page_view() {
 }
 
 /**
- * Whether a Gravity Forms submission should fire a generate_lead event.
+ * Whether an order is a successful paid purchase eligible for generate_lead.
  *
- * @param int $form_id Gravity Forms form ID.
+ * @param WC_Order $order Order object.
  * @return bool
  */
-function freya_applovin_should_track_lead( $form_id ) {
-	$form_id = (int) $form_id;
+function freya_applovin_order_is_successful_purchase( $order ) {
+	if ( ! $order instanceof WC_Order || 'shop_order' !== $order->get_type() ) {
+		return false;
+	}
 
-	$allowed = defined( 'FREYA_APPLOVIN_LEAD_FORM_IDS' ) ? (array) FREYA_APPLOVIN_LEAD_FORM_IDS : array();
-
-	/**
-	 * Filter the list of form IDs that fire generate_lead.
-	 *
-	 * Return an empty array to track every form.
-	 *
-	 * @param array $allowed Form IDs.
-	 * @param int   $form_id Current form ID.
-	 */
-	$allowed = (array) apply_filters( 'freya_applovin_lead_form_ids', $allowed, $form_id );
-
-	$track = empty( $allowed ) || in_array( $form_id, array_map( 'intval', $allowed ), true );
+	$status = $order->get_status();
+	$paid   = array( 'processing', 'completed' );
 
 	/**
-	 * Filter whether a given form submission should fire generate_lead.
+	 * Filter which order statuses count as a successful purchase for generate_lead.
 	 *
-	 * @param bool $track   Whether to track the lead.
-	 * @param int  $form_id Form ID.
+	 * @param string[] $paid  Statuses without the wc- prefix.
+	 * @param WC_Order $order Order object.
 	 */
-	return (bool) apply_filters( 'freya_applovin_track_lead', $track, $form_id );
+	$paid = (array) apply_filters( 'freya_applovin_purchase_lead_statuses', $paid, $order );
+
+	return in_array( $status, $paid, true );
 }
 
 /**
- * Resolve the monetary value for a generate_lead event.
+ * Whether the order is a new-customer first purchase.
  *
- * @param int $entry_id Gravity Forms entry ID.
- * @param int $form_id  Gravity Forms form ID.
+ * Prefers Freya Core `is_new_customer` meta / helpers when available.
+ *
+ * @param WC_Order $order Order object.
+ * @return bool
+ */
+function freya_applovin_order_is_new_customer( $order ) {
+	if ( ! $order instanceof WC_Order ) {
+		return false;
+	}
+
+	if ( function_exists( 'freya_order_is_subscription_renewal' ) && freya_order_is_subscription_renewal( $order ) ) {
+		return false;
+	}
+
+	if ( function_exists( 'freya_order_ensure_customer_type_meta' ) ) {
+		$values = freya_order_ensure_customer_type_meta( $order );
+		return isset( $values['is_new_customer'] ) && 'yes' === $values['is_new_customer'];
+	}
+
+	$flag = $order->get_meta( 'is_new_customer', true );
+	if ( in_array( $flag, array( 'yes', 'no' ), true ) ) {
+		return 'yes' === $flag;
+	}
+
+	if ( function_exists( 'freya_order_compute_is_new_customer' ) ) {
+		return (bool) freya_order_compute_is_new_customer( $order );
+	}
+
+	// Fallback: no prior shop_order for this billing email (excl. renewals via meta).
+	if ( $order->get_meta( '_subscription_renewal' ) || $order->get_meta( '_subscription_renewal_early' ) ) {
+		return false;
+	}
+
+	$email = strtolower( trim( (string) $order->get_billing_email() ) );
+	if ( '' === $email || ! is_email( $email ) || ! function_exists( 'wc_get_orders' ) ) {
+		return false;
+	}
+
+	$prior = wc_get_orders(
+		array(
+			'type'          => 'shop_order',
+			'billing_email' => $email,
+			'status'        => array( 'processing', 'completed', 'pending', 'on-hold', 'refunded' ),
+			'limit'         => 1,
+			'return'        => 'ids',
+			'exclude'       => array( (int) $order->get_id() ),
+		)
+	);
+
+	return empty( $prior );
+}
+
+/**
+ * Whether a purchase should fire generate_lead.
+ *
+ * @param WC_Order $order Order object.
+ * @return bool
+ */
+function freya_applovin_should_track_purchase_lead( $order ) {
+	if ( ! $order instanceof WC_Order ) {
+		return false;
+	}
+
+	if ( '' !== (string) $order->get_meta( FREYA_APPLOVIN_META_ORDER_LEAD_SENT_AT ) ) {
+		return false;
+	}
+
+	$track = freya_applovin_order_is_successful_purchase( $order )
+		&& freya_applovin_order_is_new_customer( $order );
+
+	/**
+	 * Filter whether a given purchase should fire generate_lead.
+	 *
+	 * @param bool     $track Whether to track.
+	 * @param WC_Order $order Order object.
+	 */
+	return (bool) apply_filters( 'freya_applovin_track_purchase_lead', $track, $order );
+}
+
+/**
+ * Resolve the monetary value for a purchase generate_lead event.
+ *
+ * @param WC_Order $order Order object.
  * @return float
  */
-function freya_applovin_get_lead_value( $entry_id, $form_id ) {
-	$value = defined( 'FREYA_APPLOVIN_DEFAULT_LEAD_VALUE' ) ? FREYA_APPLOVIN_DEFAULT_LEAD_VALUE : 0;
+function freya_applovin_get_purchase_lead_value( $order ) {
+	$value = $order instanceof WC_Order ? (float) $order->get_total() : 0.0;
 
 	/**
-	 * Filter the generate_lead value. Return 0 for duplicate or low-quality leads.
+	 * Filter the generate_lead value for a purchase.
 	 *
-	 * @param float $value    Lead value.
-	 * @param int   $entry_id Entry ID.
-	 * @param int   $form_id  Form ID.
+	 * @param float    $value Order total.
+	 * @param WC_Order $order Order object.
 	 */
-	return (float) apply_filters( 'freya_applovin_lead_value', $value, $entry_id, $form_id );
+	return (float) apply_filters( 'freya_applovin_purchase_lead_value', $value, $order );
 }
 
 /**
- * Resolve the currency for a generate_lead event.
+ * Resolve the currency for a purchase generate_lead event.
  *
- * @param int $entry_id Gravity Forms entry ID.
- * @param int $form_id  Gravity Forms form ID.
+ * @param WC_Order $order Order object.
  * @return string
  */
-function freya_applovin_get_lead_currency( $entry_id, $form_id ) {
-	$currency = defined( 'FREYA_APPLOVIN_DEFAULT_CURRENCY' ) ? FREYA_APPLOVIN_DEFAULT_CURRENCY : 'USD';
+function freya_applovin_get_purchase_lead_currency( $order ) {
+	$currency = $order instanceof WC_Order ? (string) $order->get_currency() : '';
+	if ( '' === $currency ) {
+		$currency = defined( 'FREYA_APPLOVIN_DEFAULT_CURRENCY' ) ? FREYA_APPLOVIN_DEFAULT_CURRENCY : 'USD';
+	}
 
 	/**
-	 * Filter the generate_lead currency (ISO 4217).
+	 * Filter the generate_lead currency (ISO 4217) for a purchase.
 	 *
-	 * @param string $currency Currency code.
-	 * @param int    $entry_id Entry ID.
-	 * @param int    $form_id  Form ID.
+	 * @param string   $currency Currency code.
+	 * @param WC_Order $order    Order object.
 	 */
-	return (string) apply_filters( 'freya_applovin_lead_currency', $currency, $entry_id, $form_id );
+	return (string) apply_filters( 'freya_applovin_purchase_lead_currency', $currency, $order );
 }
 
 /**
- * Queue a generate_lead event for a Gravity Forms submission.
+ * Snapshot AppLovin user_data from an order (safe for async payment webhooks).
  *
- * Captures the request-scoped identifiers immediately and defers the HTTP call
- * to Action Scheduler so the submission is never blocked.
+ * @param WC_Order $order Order object.
+ * @return array
+ */
+function freya_applovin_snapshot_user_data_from_order( $order ) {
+	if ( ! $order instanceof WC_Order ) {
+		return freya_applovin_snapshot_user_data();
+	}
+
+	$ip = (string) $order->get_customer_ip_address();
+	if ( '' === $ip ) {
+		$ip = freya_applovin_get_client_ip();
+	}
+
+	$ua = (string) $order->get_customer_user_agent();
+	if ( '' === $ua ) {
+		$ua = freya_applovin_get_user_agent();
+	}
+
+	$user_id = (int) $order->get_user_id();
+
+	return array(
+		'client_ip_address' => $ip,
+		'client_user_agent' => $ua,
+		'aleid'             => (string) $order->get_meta( FREYA_APPLOVIN_META_ORDER_ALEID ),
+		'alart'             => (string) $order->get_meta( FREYA_APPLOVIN_META_ORDER_ALART ),
+		'client_id'         => (string) $order->get_meta( FREYA_APPLOVIN_META_ORDER_CLIENT_ID ),
+		'user_id'           => $user_id > 0 ? (string) $user_id : '',
+		'esi'               => FREYA_APPLOVIN_ESI,
+	);
+}
+
+/**
+ * Queue a generate_lead event for a successful new-customer purchase.
  *
- * @param array $entry Gravity Forms entry.
- * @param array $form  Gravity Forms form.
+ * @param int|WC_Order $order Order ID or object.
  * @return void
  */
-function freya_applovin_queue_lead( $entry, $form ) {
+function freya_applovin_queue_purchase_lead( $order ) {
 	if ( ! freya_applovin_is_configured() || ! freya_applovin_has_action_scheduler() ) {
 		return;
 	}
 
-	$entry_id = (int) rgar( $entry, 'id' );
-	$form_id  = (int) rgar( $entry, 'form_id' );
+	if ( is_numeric( $order ) ) {
+		$order = wc_get_order( (int) $order );
+	}
 
-	if ( $entry_id <= 0 || ! freya_applovin_should_track_lead( $form_id ) ) {
+	if ( ! $order instanceof WC_Order || ! freya_applovin_should_track_purchase_lead( $order ) ) {
+		return;
+	}
+
+	// Ensure identifiers are stamped before snapshotting (checkout may have skipped).
+	freya_applovin_capture_order_identifiers( $order, null );
+
+	$order_id = (int) $order->get_id();
+	if ( $order_id <= 0 ) {
 		return;
 	}
 
 	$args = array(
 		array(
-			'entry_id'   => $entry_id,
-			'form_id'    => $form_id,
-			'value'      => freya_applovin_get_lead_value( $entry_id, $form_id ),
-			'currency'   => freya_applovin_get_lead_currency( $entry_id, $form_id ),
-			'user_data'  => freya_applovin_snapshot_user_data(),
+			'order_id'   => $order_id,
+			'value'      => freya_applovin_get_purchase_lead_value( $order ),
+			'currency'   => freya_applovin_get_purchase_lead_currency( $order ),
+			'user_data'  => freya_applovin_snapshot_user_data_from_order( $order ),
 			'source_url' => freya_applovin_get_event_source_url(),
 			'event_time' => freya_applovin_event_time_ms(),
 		),
@@ -203,13 +315,17 @@ function freya_applovin_queue_lead( $entry, $form ) {
 		return;
 	}
 
+	// Soft-lock so payment_complete + status hooks do not double-enqueue.
+	$order->update_meta_data( FREYA_APPLOVIN_META_ORDER_LEAD_SENT_AT, 'queued:' . gmdate( 'c' ) );
+	$order->save_meta_data();
+
 	as_enqueue_async_action( FREYA_APPLOVIN_HOOK_SEND_LEAD, $args, FREYA_APPLOVIN_AS_GROUP );
 }
 
 /**
  * Action Scheduler callback: send a queued generate_lead event.
  *
- * @param array $payload Snapshot captured at submission time.
+ * @param array $payload Snapshot captured at purchase (or legacy GF submission) time.
  * @return void
  * @throws Exception When the API call fails so Action Scheduler can retry.
  */
@@ -218,6 +334,7 @@ function freya_applovin_process_lead( $payload ) {
 		return;
 	}
 
+	$order_id = (int) ( $payload['order_id'] ?? 0 );
 	$entry_id = (int) ( $payload['entry_id'] ?? 0 );
 	$form_id  = (int) ( $payload['form_id'] ?? 0 );
 
@@ -236,18 +353,37 @@ function freya_applovin_process_lead( $payload ) {
 		),
 	);
 
-	if ( $entry_id > 0 ) {
+	if ( $order_id > 0 ) {
+		$event['dedupe_id'] = 'order_lead_' . $order_id;
+	} elseif ( $entry_id > 0 ) {
+		// Legacy in-flight GF jobs.
 		$event['dedupe_id'] = 'gf_lead_' . $entry_id;
 	}
 
 	$result = freya_applovin_send_events( array( $event ), true );
 
 	if ( is_wp_error( $result ) ) {
+		if ( $order_id > 0 ) {
+			$order = wc_get_order( $order_id );
+			if ( $order instanceof WC_Order ) {
+				$order->delete_meta_data( FREYA_APPLOVIN_META_ORDER_LEAD_SENT_AT );
+				$order->save_meta_data();
+			}
+		}
+
 		if ( $entry_id > 0 && function_exists( 'gform_update_meta' ) ) {
 			gform_update_meta( $entry_id, FREYA_APPLOVIN_META_SENT_AT, '', $form_id );
 		}
 
 		throw new Exception( 'Freya AppLovin generate_lead failed: ' . $result->get_error_message() );
+	}
+
+	if ( $order_id > 0 ) {
+		$order = wc_get_order( $order_id );
+		if ( $order instanceof WC_Order ) {
+			$order->update_meta_data( FREYA_APPLOVIN_META_ORDER_LEAD_SENT_AT, gmdate( 'c' ) );
+			$order->save_meta_data();
+		}
 	}
 
 	if ( $entry_id > 0 && function_exists( 'gform_update_meta' ) ) {
