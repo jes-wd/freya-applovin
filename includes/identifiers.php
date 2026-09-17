@@ -404,7 +404,9 @@ function freya_applovin_ids_from_customer_gf_entry( $order ) {
 		'client_id' => FREYA_APPLOVIN_META_ENTRY_CLIENT_ID,
 	) as $key => $meta_key ) {
 		$value = '';
-		if ( function_exists( 'gform_get_meta' ) ) {
+		if ( function_exists( 'freya_gf_get_entry_meta' ) ) {
+			$value = (string) freya_gf_get_entry_meta( $entry_id, $meta_key );
+		} elseif ( function_exists( 'gform_get_meta' ) ) {
 			$value = (string) gform_get_meta( $entry_id, $meta_key );
 		} else {
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
